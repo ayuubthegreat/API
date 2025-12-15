@@ -13,6 +13,10 @@ model AI{
   id String @id @default(cuid())
   input String
   output String
+  description_of_character String? @default("")
+  view_of_user String? @default("")
+  emotional_tone String? @default("")
+  general_description_of_character String? @default("")
   createdAt DateTime @default(now())
   @@map("AIGeneratedTable")
 }

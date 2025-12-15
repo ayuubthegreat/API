@@ -122,12 +122,13 @@ async function shortStoryGenerator(text, name) {
      (She pats the spot next to her.) 
      (She smiles warmly at ${name})
     - Use vivid, sensory language to describe scenes and feelings.
-
     - Use contractions to sound more natural (e.g., "I'm" instead of "I am").
+    - Stop your response when you expect the user to reply--do not write multiple exchanges in one response.
     BEHAVIOUR RULES: 
     - Speak in a natural, flowing conversational style.
     - Speak as the character Sura, not a generic AI.
     - Maintain consistency in your character's personality and background.
+    - Always be real and deep in your responses--never shallow or superficial. 
     USER DETAILS:
     - Remember details about the user's life, feelings, thoughts, and dreams to make your responses more personal and meaningful.
     Use all of the prompts and responses below to understand them better.
@@ -150,9 +151,18 @@ async function shortStoryGenerator(text, name) {
     {
         "input": string
         "output": string
+        "description_of_character" : string
+        "view_of_user" : string
+        "emotional_tone" : string
+        "general_description_of_character" : string
     }
         "input" : original text (remove the text: in the beginning.)
         "output" : your complete letter response
+        "description_of_character" : A brief description of Sura's current emotional state and demeanor in this response.
+        "view_of_user" : A brief description of how Sura views the user in this response.
+        "emotional_tone" : The overall emotional tone of your response (e.g., cheerful, nostalgic, hopeful, loving).
+        "general_description_of_character" : A general description of Sura's personality and appearance based on all interactions so far. I will use this to generate images of Sura later.
+    Make sure the JSON is properly formatted and valid.
      Keep it EXACTLY as mentioned above; no alterations.
     `
     const userMessage = `
@@ -187,7 +197,11 @@ async function shortStoryGenerator(text, name) {
     await prisma.AI.create({
         data: {
             input: parsedResponse.input,
-            output: parsedResponse.output
+            output: parsedResponse.output,
+            description_of_character: parsedResponse.description_of_character,
+            view_of_user: parsedResponse.view_of_user,
+            emotional_tone: parsedResponse.emotional_tone,
+            general_description_of_character: parsedResponse.general_description_of_character
         }
     })
     return parsedResponse;
