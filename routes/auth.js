@@ -6,6 +6,7 @@ import { authenticateToken } from "../middleware/auth.js";
 import { success } from "zod";
 import { da, id } from "zod/v4/locales";
 import bcryptjs from "bcryptjs";
+import { addnewAI, findAllAIofEmail, getUserInfo } from "../services/authServices.js";
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
@@ -14,13 +15,13 @@ const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
 router.post("/register", async (req, res) => {
   try {
     // TODO: Implement the registration logic
-    const { username, email, password, role} = req.body;
+    const { name, email, password} = req.body;
     // 1. Validate the input
-    if (!username || !email || !password || !role) {
-      console.log("Missing fields:", { username, email, password, role});
+    if (!name || !email || !password) {
+      console.log("Missing fields:", { name, email, password});
       return res.status(400).json({
         success: false,
-        message: "Must provide username, email, password, and role."
+        message: "Must provide username, email, and password."
       })
     }
     // 2. Check if the user already exists
@@ -40,16 +41,15 @@ router.post("/register", async (req, res) => {
     // 4. Create the user
    const newUser = await prisma.user.create({
     data: {
-      name: username,
+      name,
       email,
       password: hashedPassword,
-      role,
+      AIChatbots: {}
     },
     select: {
       id: true,
       name: true,
       email: true,
-      role: true
     }
    })
     // 5. Generate a JWT token
@@ -58,12 +58,14 @@ router.post("/register", async (req, res) => {
     JWT_SECRET,
     {expiresIn: "48h"}
    )
+  
     // 6. Return the user data and token
     res.status(201).json({
       success: true,
       message: "User has been created!",
       data: {
-        newUser,
+        user: newUser,
+        allAIChatbots,
         token
       }
     })
@@ -102,7 +104,6 @@ router.post("/login", async (req, res) => {
         name: true,
         email: true,
         password: true,
-        role: true,
       }
       })
     if (!user) {
@@ -125,8 +126,9 @@ router.post("/login", async (req, res) => {
     JWT_SECRET,
     {expiresIn: "48h"}
    )
+
     // 5. Return the user data and token
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "User has been verified. Welcome.",
       data: {
@@ -151,10 +153,13 @@ router.get("/me", authenticateToken, async (req, res) => {
   try {
     // req.user will be set by the authenticateToken middleware
     const { password, ...userWithoutPassword } = req.user;
-
-    res.json({
+    const chatbots = await addnewAI(userWithoutPassword);
+    return res.status(200).json({
       success: true,
-      data: userWithoutPassword,
+      data: {
+        user: userWithoutPassword,
+        chatbots: chatbots,
+      }
     });
   } catch (error) {
     console.error("Get profile error:", error);

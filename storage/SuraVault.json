@@ -1,0 +1,7 @@
+[
+    {
+        "input": "string",
+        "output": "string",
+        "tone_of_response": "string (describe the emotional tone of your response in a few words)"
+    }
+]

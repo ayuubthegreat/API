@@ -25,7 +25,6 @@ export const authenticateToken = async (req, res, next) => {
         id: true,
         name: true,
         email: true,
-        role: true
       }
     })
     if (!user) {
@@ -37,7 +36,6 @@ export const authenticateToken = async (req, res, next) => {
     // 4. If the user doesn't exist, throw an error
     // 5. Attach the user to the request object
     req.user = user;
-    req.role = user.role;
     // 6. Call the next middleware
     next();
   } catch (error) {

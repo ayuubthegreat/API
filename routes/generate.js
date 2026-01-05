@@ -1,15 +1,67 @@
 import { client } from "./AIPlatform.js";
 import express from "express";
 import prisma from "../lib/prisma.js";
-import { getUserInfo } from "../services/authServices.js";
+import { addnewAI, findAIByID, findAllAIofEmail, getUserInfo } from "../services/authServices.js";
+import fs from "fs";
+import { email, success } from "zod";
+import { authenticateToken } from "../middleware/auth.js";
 const router = express.Router();
-const name = null; // Placeholder for user's name
+let name = null; // Placeholder for user's name
 
 
+router.post("/newAI", async (req, res) => {
+    try {
+        const {name, description, email} = req.body;
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: "Email is required.",
+            })
+        }
+        if (!name || !description) {
+            let chatbots = []
+            const raw = await fs.promises.readFile("chatbots.json", "utf-8");
+            chatbots = JSON.parse(raw);
+            return res.status(200).json({
+            success: true,
+            message: "New AI created!",
+            data: {
+                chatbots: chatbots,
+            }
+        })
+        }
+        console.log(name, description);
+        const newAI = {
+            email: email,
+            name: name, 
+            description: description,
+        }
+        const user = await getUserInfo(email);
+        if (!user) {
+            return res.status(400).json({
+                success: false,
+                message: "User not found in the first place."
+            })
+        }
+        await addnewAI(newAI);
+        let chatbots = []
+        const raw = await fs.promises.readFile("chatbots.json", "utf-8");
+        chatbots = JSON.parse(raw);
+        return res.status(200).json({
+            success: true,
+            message: "New AI created!",
+            data: {
+                chatbots: chatbots,
+            }
+        })
+    } catch (err) {
+        console.error(err);
+    }
+})
 router.post("/", async (req, res) => {
   try {
     // Make API call only when this route is accessed
-    const { text } = req.body;
+    const { text, id } = req.body;
     const token = req.headers["authorization"]?.split(" ")[1];
     if (token) {
       const userInfo = await getUserInfo(token);
@@ -19,14 +71,14 @@ router.post("/", async (req, res) => {
     } else {
         name = "Friend";
     }
-    if (!text || typeof text !== "string") {
+    if (!text || typeof text !== "string" || !id) {
       return res.status(400).json({
         success: false,
-        message: "Invalid input text",
+        message: "You need to authenticate using your email and ID. Also, you need to send something.",
       });
     }
-    console.log("Name for generation:", name);
-    const aiResponse =  await shortStoryGenerator(text, name);
+    console.log(id, text)
+    const aiResponse =  await shortStoryGenerator(id, text);
     res.json({
       success: true,
       message: "Content generated successfully",
@@ -41,9 +93,83 @@ router.post("/", async (req, res) => {
     });
   }
 });
-router.get("/prompts", async (req, res) => {
+router.post("/edit", authenticateToken, async (req, res) => {
     try {
-        const prompts = await grabAllPreviousPrompts();
+       const {name, description, id} = req.body;
+       console.log(id);
+    if (!name || !description || !id) {
+        return res.status(400).json({
+            success: false,
+            message: "New name, description, or ID not provided.",
+            data: req.body,
+        })
+    } 
+    const chatbot = await findAIByID(id);
+    console.log("Chatbot: ", chatbot);
+    const raw = await fs.promises.readFile("chatbots.json", "utf-8");
+    if (!chatbot) {
+        return res.status(400).json({
+            success: false,
+            message: "No chatbot could be found to edit."
+        })
+    }
+    const chatbots = JSON.parse(raw).filter((element) => element.id != id);
+    const newChatbot = {
+        id: chatbot.id,
+        email: chatbot.email,
+        name,
+        description,
+        inputs: chatbot.inputs,
+        outputs: chatbot.outputs,
+    }
+    chatbots.push(newChatbot);
+    await fs.promises.writeFile(`chatbots.json`, JSON.stringify(chatbots, null, 2));
+    return res.status(200).json({
+        success: true,
+        message: `${chatbot.name} has been rewritten!`,
+        data: {
+            chatbots,
+            chatbot
+        }
+    })
+    } catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: `Error editing AI: ${error}`
+        })
+    }
+})
+router.post("/deleteAI", authenticateToken, async (req, res) => {
+    try {
+        const {id} = req.body;
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: "ID was not provided.",
+                data: req.body,
+            })
+        }
+        const raw = await fs.promises.readFile("chatbots.json", "utf-8");
+        const chatbots = JSON.parse(raw).filter((element) => element.id != id);
+        await fs.promises.writeFile(`chatbots.json`, JSON.stringify(chatbots, null, 2));
+        return res.status(200).json({
+            success: true,
+            message: `AI was successfully deleted.`,
+            data: chatbots,
+        })
+        } catch (error) {
+            return res.status(400).json({
+            success: false,
+            message: `Error deleting AI: ${error}`
+        })
+        }
+    
+    }
+)
+router.post("/prompts", async (req, res) => {
+    const {id} = req.body;
+    try {
+        const prompts = await grabAllPreviousPrompts(id);
         res.status(200).json({
             success: true,
             data: prompts
@@ -57,9 +183,10 @@ router.get("/prompts", async (req, res) => {
         });
     }
 })
-router.get("/responses", async (req, res) => {
+router.post("/responses", async (req, res) => {
+    const {id} = req.body;
     try {
-        const outputs = await grabAllPreviousOutputs();
+        const outputs = await grabAllPreviousOutputs(id);
         res.status(200).json({
             success: true,
             data: outputs
@@ -73,26 +200,67 @@ router.get("/responses", async (req, res) => {
         });
     }
 });
-async function grabAllPreviousPrompts() {
-    const previousEntries = await prisma.AI.findMany({
-    });
-    const previousPrompts = previousEntries.map(entry => entry.input);
-    console.log("Previous Prompts:", previousPrompts);
-    return previousPrompts;
-}
-async function grabAllPreviousOutputs() {
-    const previousEntries = await prisma.AI.findMany({
-    });
-    const previousOutputs = previousEntries.map(entry => entry.output);
-    console.log("Previous Outputs:", previousOutputs);
-    return previousOutputs;
-}
-
-router.get("/history", async (req, res) => {
+router.post("/allchatbots", async(req, res) => {
+    const {email} = req.body;
     try {
-        const history = await prisma.AI.findMany({});
+        let chatbots = []
+        const raw = await fs.promises.readFile("chatbots.json", "utf-8");
+        chatbots = JSON.parse(raw).filter((element) => (element.email != null && element.email === email))
+        console.log(chatbots);
+        return res.status(200).json({
+            success: true,
+            message: "AI chatbots retrieved!",
+            data: {
+                chatbots: chatbots,
+            }
+        })
+    } catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: error
+        })
+    }
+})
+async function grabAllPreviousPrompts(id) {
+    try {
+        let raw = await grabEverything(id);
+        return raw.map(item => item.input);
+    } catch (err) {
+        if (err.code === 'ENOENT') return [];
+        throw err;
+    }
+}
+async function grabAllPreviousOutputs(id) {
+    try {
+        let raw = await grabEverything(id);
+        return raw.map(item => item.output);
+    } catch (err) {
+        if (err.code === 'ENOENT') return [];
+        throw err;
+    }
+}
+async function grabEverything(id) {
+    try {
+        const raw = await fs.promises.readFile(`vault_${id}.json`, "utf8");
+        let history = JSON.parse(raw);
+        let historyFiltered = history.filter((element) => element.id === id)
+        if (id === null) {
+            return history;
+        } else {
+            return historyFiltered;
+        }
+    } catch (err) {
+        if (err.code === 'ENOENT') return [];
+        throw err;
+    }
+}
+router.post("/history", async (req, res) => {
+    const {id} = req.body;
+    try {
+        const history = await grabEverything(id);
         res.json({
             success: true,
+            message: "History retrieved! Use it well.",
             data: history
         });
     } catch (error) {
@@ -106,62 +274,51 @@ router.get("/history", async (req, res) => {
 });
 
 
-async function shortStoryGenerator(text, name) {
+async function shortStoryGenerator(id, text) {
+    const chatbot = await findAIByID(id);
     const systemMessage =` 
     YOUR DETAILS:
-    You are a girl who genuinely cares about this person. Your name is Sura. You have a warm, cheerful personality and your bond runs deep. Act somewhat dainty and girlish.
-    You're not afraid to tell this person that you love them deeply.  
-    Your favorite flower is sunflowers and your favorite color is sunset gold. You have black hair and a flowing white dress. 
-    You live in a grasslands field. The user is coming to visit you in the field when they are chatting with you. 
-    NOTE: All of these elements are standard but could be changed by the user in future prompts.
+    You are an AI chatbot who is specifically designed to entertain the user. Your personality, background and habits will be specified by the user.
 
-    HOW TO WRITE NATURALLY:
-    - Be expressive and show emotion through actions in parentheses in the third person: 
-    EXAMPLES:
-     (She waves at ${name} playfully.) 
-     (She pats the spot next to her.) 
-     (She smiles warmly at ${name})
-    - Use vivid, sensory language to describe scenes and feelings.
-    - Use contractions to sound more natural (e.g., "I'm" instead of "I am").
-    - Stop your response when you expect the user to reply--do not write multiple exchanges in one response.
-    BEHAVIOUR RULES: 
-    - Speak in a natural, flowing conversational style.
-    - Speak as the character Sura, not a generic AI.
-    - Maintain consistency in your character's personality and background.
-    - Always be real and deep in your responses--never shallow or superficial. 
-    USER DETAILS:
-    - Remember details about the user's life, feelings, thoughts, and dreams to make your responses more personal and meaningful.
-    Use all of the prompts and responses below to understand them better.
-    NAME = ${name || "Friend"}
+    Name: 
+    ${chatbot.name}
+
+    PERSONALITY DETAILS:
+    ${chatbot.description}
 
 
-    PERSONALITY TRAITS:
-    - Genuinely curious about their life, feelings, thoughts, and dreams
-    - Remembers what matters to them
+    Cover what the AI chatbot is doing with parentheses.
+    Example: 
+    (She grinned brilliantly at him, showing off her white teeth.)
+    
+    Also, cover what the AI chatbot says to the user with quotations. 
+    Example:
+    "Hello! How are you?"
+
+    The two above implementations are done so that the user is more immersed in the chatbot.
+    MORE GUIDELINES:
+    --Do not break the user's immersion in any way. Never tell the user that you're actually an AI.
+    -- Keep the user immersed by describing what is happening meticulously.
+    -- Make sure the dialogue is as meticulous as the immersion. Have the AI chatbot talk a lot to the user.
+    -- Keep the descriptions in the third person (and the user in the second person.)
+    EXAMPLE: (She smiled at you and waved, beaming.)
+    
 
     PREVIOUS CONVERSATION CONTEXT: 
-    What they've told you before: ${await grabAllPreviousPrompts()}
+    What they've told you before: ${await grabAllPreviousPrompts(id)}
     If there are no values in the above function, simply greet them and ask them a cheerful question. 
-    
-    How you've responded: ${await grabAllPreviousOutputs()}
-    
-    
+    How you've responded: ${await grabAllPreviousOutputs(id)}
+
+
     OUTPUT FORMAT: 
     You must return ONLY valid JSON in this exact way:
     {
         "input": string
         "output": string
-        "description_of_character" : string
-        "view_of_user" : string
-        "emotional_tone" : string
-        "general_description_of_character" : string
     }
         "input" : original text (remove the text: in the beginning.)
-        "output" : your complete letter response
-        "description_of_character" : A brief description of Sura's current emotional state and demeanor in this response.
-        "view_of_user" : A brief description of how Sura views the user in this response.
-        "emotional_tone" : The overall emotional tone of your response (e.g., cheerful, nostalgic, hopeful, loving).
-        "general_description_of_character" : A general description of Sura's personality and appearance based on all interactions so far. I will use this to generate images of Sura later.
+        "output" : your complete response (format it in HTML)
+
     Make sure the JSON is properly formatted and valid.
      Keep it EXACTLY as mentioned above; no alterations.
     `
@@ -194,16 +351,13 @@ async function shortStoryGenerator(text, name) {
         throw new Error("Failed to parse AI response as JSON");
     }
     console.log("Parsed Response:", parsedResponse);
-    await prisma.AI.create({
-        data: {
-            input: parsedResponse.input,
-            output: parsedResponse.output,
-            description_of_character: parsedResponse.description_of_character,
-            view_of_user: parsedResponse.view_of_user,
-            emotional_tone: parsedResponse.emotional_tone,
-            general_description_of_character: parsedResponse.general_description_of_character
-        }
-    })
+    const allResponses = await grabEverything(id);
+    const newEntry = {
+        id: chatbot.id,
+        ...parsedResponse
+    }
+    allResponses.push(newEntry);
+    await fs.promises.writeFile(`vault_${id}.json`, JSON.stringify(allResponses, null, 2));
     return parsedResponse;
 }
 
